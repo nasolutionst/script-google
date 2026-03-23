@@ -4,7 +4,6 @@ const CONFIG = {
   HOJA_BASE: 'BaseDropdown',
   HOJA_REGISTRO: 'RegistroFacturas',
   HOJA_REGISTRO_PRESUPUESTOS: 'RegistroPresupuestos',
-
   
   PDF_FOLDER_ID: '1qDlTzogwfnQlnycc83wmsQIC2apf4ZzO',
   NOMBRE_CARPETA_FACTURAS_CLIENTE: 'Facturas por cliente',
