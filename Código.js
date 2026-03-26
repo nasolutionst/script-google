@@ -75,12 +75,21 @@ function onEdit(e) {
   if (!e || !e.range) return;
 
   const hoja = e.range.getSheet();
-  if (!esHojaDocumentoEditable_(hoja)) return;
-
-  const layout = obtenerLayoutFactura_(hoja);
   const fila = e.range.getRow();
   const columna = e.range.getColumn();
   const a1 = e.range.getA1Notation();
+
+  // Si se edita la base de clientes, reconstruye el desplegable al momento
+  if (hoja.getName() === CONFIG.HOJA_BASE) {
+    if (fila >= 2 && columna === 1) {
+      repararDropdownClientes_();
+    }
+    return;
+  }
+
+  if (!esHojaDocumentoEditable_(hoja)) return;
+
+  const layout = obtenerLayoutFactura_(hoja);
 
   if (a1 === CONFIG.RANGO_CLIENTE) {
     rellenarDatosCliente_(hoja);
@@ -1366,13 +1375,20 @@ function forzarNuevoNumeroPresupuesto_(hojaPresupuesto) {
 function repararDropdownClientes_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const hojaBase = ss.getSheetByName(CONFIG.HOJA_BASE);
-  const hojaFactura = ss.getSheetByName(CONFIG.HOJA_FACTURA);
-  const hojaPresupuesto = ss.getSheetByName(CONFIG.HOJA_PRESUPUESTO);
 
   if (!hojaBase) return;
 
+  const hojasObjetivo = ss.getSheets().filter(hoja => esHojaDocumentoEditable_(hoja));
+  if (!hojasObjetivo.length) return;
+
   const ultimaFila = hojaBase.getLastRow();
-  if (ultimaFila < 2) return;
+
+  if (ultimaFila < 2) {
+    hojasObjetivo.forEach(hoja => {
+      hoja.getRange(CONFIG.RANGO_CLIENTE).clearDataValidations();
+    });
+    return;
+  }
 
   const rangoClientes = hojaBase.getRange(2, 1, ultimaFila - 1, 1);
 
@@ -1382,13 +1398,9 @@ function repararDropdownClientes_() {
     .setHelpText('Selecciona un cliente de la base de datos')
     .build();
 
-  if (hojaFactura) {
-    hojaFactura.getRange(CONFIG.RANGO_CLIENTE).setDataValidation(regla);
-  }
-
-  if (hojaPresupuesto) {
-    hojaPresupuesto.getRange(CONFIG.RANGO_CLIENTE).setDataValidation(regla);
-  }
+  hojasObjetivo.forEach(hoja => {
+    hoja.getRange(CONFIG.RANGO_CLIENTE).setDataValidation(regla);
+  });
 }
 
 function aplicarEstiloModernoFacturas() {
