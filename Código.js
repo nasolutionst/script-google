@@ -18,6 +18,8 @@ const CONFIG = {
   RANGO_CLIENTE: 'C20',
   RANGO_CIF: 'C21',
   RANGO_DIRECCION: 'C22',
+  RANGO_CODIGO_POSTAL: 'C23',
+  RANGO_ZONA_CLIENTE: 'F23',
 
   FILA_PRIMERA_LINEA: 25,
   FILA_ULTIMA_LINEA_BASE: 29,
@@ -32,6 +34,91 @@ const CONFIG = {
 
   PREFIJO_PRESUPUESTO: 'PRE',
   FORMATO_FECHA: 'dd/MM/yyyy'
+};
+
+const CODIGOS_POSTALES_IBIZA_ = {
+  '07800': [
+    'Eivissa',
+    'Blanca Dona',
+    'Can Bufi',
+    'Can Escandell',
+    'Es Viver',
+    'Illa Plana',
+    'Montecristo',
+    'Ses Figueres',
+    'Talamanca'
+  ],
+  '07814': [
+    'Santa Gertrudis de Fruitera'
+  ],
+  '07817': [
+    'Aeroport d\'Eivissa',
+    'Sant Jordi de ses Salines',
+    'Can Bellotera',
+    'Platja d\'en Bossa',
+    'Sa Carroca'
+  ],
+  '07818': [
+    'Les Salines',
+    'La Caleta',
+    'Sant Francesc de s\'Estany'
+  ],
+  '07819': [
+    'Jesus',
+    'Ca n\'Cirer',
+    'Cana Negreta',
+    'Cap Martinet',
+    'Prat de Jesus',
+    'Roca Llisa'
+  ],
+  '07820': [
+    'Sant Antoni de Portmany',
+    'Cala Gracio'
+  ],
+  '07829': [
+    'Cala Bassa',
+    'Cala Bou',
+    'Cala Comte',
+    'Cala Corral',
+    'Cala Tarida',
+    'Port des Torrent',
+    'Cala Codolar',
+    'Club Delfin',
+    'El Paraiso',
+    'Pinos y Mar'
+  ],
+  '07830': [
+    'Sant Josep de sa Talaia',
+    'Cala Vedella',
+    'Cala Carbo',
+    'Cala d\'Hort',
+    'Cala Moli',
+    'Calo den Real'
+  ],
+  '07839': [
+    'Benimussa',
+    'Sant Agusti des Vedra',
+    'Es Cubells',
+    'Port Roig',
+    'Vista Alegre - Sa Caixota'
+  ],
+  '07840': [
+    'Santa Eularia des Riu'
+  ],
+  '07849': [
+    'Cala Llonga',
+    'Cala Pada',
+    'Es Canar',
+    'La Siesta',
+    'Niu Blau',
+    'Pont de s\'Argentera'
+  ],
+  '07850': [
+    'Sant Carles de Peralta',
+    'Cala Llenya',
+    'Cala Mastella',
+    'Es Figueral'
+  ]
 };
 
 function onOpen() {
@@ -69,6 +156,7 @@ function onOpen() {
   }
 
   repararDropdownClientes_();
+  repararDropdownCodigosPostalesIbiza_();
 }
 
 function onEdit(e) {
@@ -84,6 +172,10 @@ function onEdit(e) {
 
   if (a1 === CONFIG.RANGO_CLIENTE) {
     rellenarDatosCliente_(hoja);
+  }
+
+  if (a1 === CONFIG.RANGO_CODIGO_POSTAL) {
+    actualizarDropdownZonaPorCodigoPostal_(hoja);
   }
 
   if (a1 === CONFIG.RANGO_FECHA_FACTURA) {
@@ -498,6 +590,8 @@ function prepararDocumentoNuevo_(hoja, tipoDocumento) {
   const layout = obtenerLayoutFactura_(hoja);
 
   hoja.getRange('C20:C22').clearContent();
+  hoja.getRange(CONFIG.RANGO_CODIGO_POSTAL).clearContent();
+  hoja.getRange(CONFIG.RANGO_ZONA_CLIENTE).clearContent();
   hoja.getRange(`B${layout.filaNotas}`).clearContent();
 
   hoja.getRange(`A${layout.filaResumenValores}`).setValue(0);
@@ -509,6 +603,7 @@ function prepararDocumentoNuevo_(hoja, tipoDocumento) {
     forzarNuevoNumeroPresupuesto_(hoja);
   }
 
+  aplicarDropdownCodigosPostalesIbizaEnHoja_(hoja);
   actualizarFechaSecundariaDocumento_(hoja);
   recalcularFactura_(hoja);
   aplicarFormatosFactura_(hoja);
@@ -651,23 +746,16 @@ function exportarDocumentoPDF_(hoja, nombreCarpetaRaizClientes) {
 
   const blob = response.getBlob().setName(nombreArchivo);
 
-  // Carpeta general
   guardarOReemplazarArchivoEnCarpeta_(carpetaGeneral, blob, nombreArchivo);
-
-  // Carpeta por cliente
   guardarOReemplazarArchivoEnCarpeta_(carpetaCliente, blob, nombreArchivo);
 
-  // Carpeta por mes solo para facturas
   let mensajeMes = '';
   if (tipoDocumento === 'factura') {
     const carpetaRaizMeses = obtenerCarpetaRaizMensualFacturas_();
     const nombreMes = obtenerNombreMes_(fechaDocumento);
     const carpetaMes = obtenerOCrearSubcarpeta_(carpetaRaizMeses, nombreMes);
 
-    // Borra versiones antiguas del mismo PDF en cualquier mes
     borrarArchivoPorNombreEnArbol_(carpetaRaizMeses, nombreArchivo);
-
-    // Guarda la nueva versión en el mes correcto
     guardarOReemplazarArchivoEnCarpeta_(carpetaMes, blob, nombreArchivo);
 
     mensajeMes = `\n- ${obtenerNombreVisibleCarpetaMensual_()}/${nombreMes}`;
@@ -729,6 +817,15 @@ function copiarPresupuestoAFactura_(hojaOrigen, hojaDestino) {
   );
   hojaDestino.getRange(CONFIG.RANGO_DIRECCION).setValue(
     hojaOrigen.getRange(CONFIG.RANGO_DIRECCION).getDisplayValue()
+  );
+  hojaDestino.getRange(CONFIG.RANGO_CODIGO_POSTAL).setValue(
+    hojaOrigen.getRange(CONFIG.RANGO_CODIGO_POSTAL).getDisplayValue()
+  );
+
+  aplicarDropdownCodigosPostalesIbizaEnHoja_(hojaDestino);
+
+  hojaDestino.getRange(CONFIG.RANGO_ZONA_CLIENTE).setValue(
+    hojaOrigen.getRange(CONFIG.RANGO_ZONA_CLIENTE).getDisplayValue()
   );
 
   hojaDestino.getRange(CONFIG.RANGO_FECHA_FACTURA).setValue(new Date());
@@ -939,6 +1036,7 @@ function aplicarFormatosFactura_(hojaFactura) {
   hojaFactura.getRange(`A${layout.filaResumenValores}`).setNumberFormat('0.00%');
   hojaFactura.getRange(`D${layout.filaResumenValores}`).setNumberFormat('0.00%');
   hojaFactura.getRange(`E${CONFIG.FILA_PRIMERA_LINEA}:E${layout.filaUltimaLinea}`).setNumberFormat('0.00%');
+  hojaFactura.getRange(CONFIG.RANGO_CODIGO_POSTAL).setNumberFormat('00000');
 }
 
 function restablecerLineasFactura_(hojaFactura) {
@@ -1097,6 +1195,7 @@ function esHojaPresupuestoEditable_(hoja) {
 
 function repararHojaFactura_(hojaFactura) {
   aplicarFormatosFactura_(hojaFactura);
+  aplicarDropdownCodigosPostalesIbizaEnHoja_(hojaFactura);
   rellenarDatosCliente_(hojaFactura);
   actualizarFechaSecundariaDocumento_(hojaFactura);
   recalcularFactura_(hojaFactura);
@@ -1191,6 +1290,15 @@ function crearOActualizarHojaArchivo_(hojaOrigen, numeroDocumento) {
   );
   hojaNueva.getRange(CONFIG.RANGO_DIRECCION).setValue(
     hojaOrigen.getRange(CONFIG.RANGO_DIRECCION).getDisplayValue()
+  );
+  hojaNueva.getRange(CONFIG.RANGO_CODIGO_POSTAL).setValue(
+    hojaOrigen.getRange(CONFIG.RANGO_CODIGO_POSTAL).getDisplayValue()
+  );
+
+  aplicarDropdownCodigosPostalesIbizaEnHoja_(hojaNueva);
+
+  hojaNueva.getRange(CONFIG.RANGO_ZONA_CLIENTE).setValue(
+    hojaOrigen.getRange(CONFIG.RANGO_ZONA_CLIENTE).getDisplayValue()
   );
 
   ss.setActiveSheet(hojaNueva);
@@ -1391,6 +1499,75 @@ function repararDropdownClientes_() {
   }
 }
 
+function repararDropdownCodigosPostalesIbiza_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  ss.getSheets().forEach(hoja => {
+    if (esHojaDocumentoEditable_(hoja)) {
+      aplicarDropdownCodigosPostalesIbizaEnHoja_(hoja);
+    }
+  });
+}
+
+function aplicarDropdownCodigosPostalesIbizaEnHoja_(hoja) {
+  if (!hoja) return;
+
+  const codigos = Object.keys(CODIGOS_POSTALES_IBIZA_).sort();
+
+  const reglaCodigoPostal = SpreadsheetApp.newDataValidation()
+    .requireValueInList(codigos, true)
+    .setAllowInvalid(false)
+    .setHelpText('Selecciona un codigo postal de Ibiza')
+    .build();
+
+  hoja.getRange(CONFIG.RANGO_CODIGO_POSTAL)
+    .setDataValidation(reglaCodigoPostal)
+    .setNumberFormat('00000');
+
+  actualizarDropdownZonaPorCodigoPostal_(hoja);
+}
+
+function actualizarDropdownZonaPorCodigoPostal_(hoja) {
+  if (!hoja) return;
+
+  const rangoCodigoPostal = hoja.getRange(CONFIG.RANGO_CODIGO_POSTAL);
+  const rangoZona = hoja.getRange(CONFIG.RANGO_ZONA_CLIENTE);
+
+  let codigoPostal = String(rangoCodigoPostal.getDisplayValue() || '').trim();
+  codigoPostal = codigoPostal.replace(/[^\d]/g, '');
+
+  if (codigoPostal) {
+    codigoPostal = codigoPostal.padStart(5, '0').substring(0, 5);
+    rangoCodigoPostal.setNumberFormat('00000');
+
+    if (rangoCodigoPostal.getDisplayValue().trim() !== codigoPostal) {
+      rangoCodigoPostal.setValue(codigoPostal);
+    }
+  }
+
+  const zonas = CODIGOS_POSTALES_IBIZA_[codigoPostal] || [];
+  const valorActualZona = rangoZona.getDisplayValue().trim();
+
+  rangoZona.clearDataValidations();
+
+  if (!zonas.length) {
+    rangoZona.clearContent();
+    return;
+  }
+
+  const reglaZona = SpreadsheetApp.newDataValidation()
+    .requireValueInList(zonas, true)
+    .setAllowInvalid(false)
+    .setHelpText(`Selecciona una zona/cala del codigo postal ${codigoPostal}`)
+    .build();
+
+  rangoZona.setDataValidation(reglaZona);
+
+  if (valorActualZona && !zonas.includes(valorActualZona)) {
+    rangoZona.clearContent();
+  }
+}
+
 function aplicarEstiloModernoFacturas() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const hojas = [
@@ -1428,10 +1605,10 @@ function aplicarEstiloVisualDocumento_(hoja) {
     .setFontSize(14)
     .setFontWeight('bold');
 
-  hoja.getRange('A3:F22')
+  hoja.getRange('A3:F23')
     .setFontSize(10);
 
-  hoja.getRange('A1:F22')
+  hoja.getRange('A1:F23')
     .setWrap(true);
 
   hoja.getRange('A24:F24')
@@ -1498,6 +1675,8 @@ function aplicarEstiloVisualDocumento_(hoja) {
   hoja.getRange(CONFIG.RANGO_CLIENTE).setFontWeight('bold');
   hoja.getRange(CONFIG.RANGO_CIF).setFontWeight('bold');
   hoja.getRange(CONFIG.RANGO_DIRECCION).setFontWeight('bold');
+  hoja.getRange(CONFIG.RANGO_CODIGO_POSTAL).setFontWeight('bold');
+  hoja.getRange(CONFIG.RANGO_ZONA_CLIENTE).setFontWeight('bold');
 
   hoja.getRange(CONFIG.RANGO_NUMERO_FACTURA).setFontWeight('bold');
   hoja.getRange(CONFIG.RANGO_FECHA_FACTURA).setFontWeight('bold');
