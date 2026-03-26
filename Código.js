@@ -58,10 +58,6 @@ function onOpen() {
     .addItem('Reparar presupuesto actual', 'repararPresupuestoActual')
     .addToUi();
 
-  ui.createMenu('Utilidades')
-    .addItem('Reparar desplegable clientes', 'repararDropdownClientes')
-    .addToUi();
-
   const plantillaFactura = obtenerHojaPlantillaFactura_();
   if (plantillaFactura) {
     repararHojaFactura_(plantillaFactura);
@@ -79,21 +75,12 @@ function onEdit(e) {
   if (!e || !e.range) return;
 
   const hoja = e.range.getSheet();
-  const a1 = e.range.getA1Notation();
-
-  // Si cambias la base de clientes, reconstruimos el desplegable
-  if (hoja.getName() === CONFIG.HOJA_BASE) {
-    if (e.range.getColumn() === 1) {
-      repararDropdownClientes_();
-    }
-    return;
-  }
-
   if (!esHojaDocumentoEditable_(hoja)) return;
 
   const layout = obtenerLayoutFactura_(hoja);
   const fila = e.range.getRow();
   const columna = e.range.getColumn();
+  const a1 = e.range.getA1Notation();
 
   if (a1 === CONFIG.RANGO_CLIENTE) {
     rellenarDatosCliente_(hoja);
@@ -1376,31 +1363,18 @@ function forzarNuevoNumeroPresupuesto_(hojaPresupuesto) {
    DESPLEGABLE CLIENTES
 ========================= */
 
-function repararDropdownClientes() {
-  repararDropdownClientes_();
-  SpreadsheetApp.getUi().alert('Desplegable de clientes reparado correctamente.');
-}
-
 function repararDropdownClientes_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const hojaBase = ss.getSheetByName(CONFIG.HOJA_BASE);
+  const hojaFactura = ss.getSheetByName(CONFIG.HOJA_FACTURA);
+  const hojaPresupuesto = ss.getSheetByName(CONFIG.HOJA_PRESUPUESTO);
 
   if (!hojaBase) return;
 
-  const ultimaFilaClientes = obtenerUltimaFilaConDatosEnColumna_(hojaBase, 1);
+  const ultimaFila = hojaBase.getLastRow();
+  if (ultimaFila < 2) return;
 
-  const hojasDestino = ss.getSheets().filter(hoja =>
-    esHojaFacturaEditable_(hoja) || esHojaPresupuestoEditable_(hoja)
-  );
-
-  if (ultimaFilaClientes < 2) {
-    hojasDestino.forEach(hoja => {
-      hoja.getRange(CONFIG.RANGO_CLIENTE).clearDataValidations();
-    });
-    return;
-  }
-
-  const rangoClientes = hojaBase.getRange(2, 1, ultimaFilaClientes - 1, 1);
+  const rangoClientes = hojaBase.getRange(2, 1, ultimaFila - 1, 1);
 
   const regla = SpreadsheetApp.newDataValidation()
     .requireValueInRange(rangoClientes, true)
@@ -1408,26 +1382,13 @@ function repararDropdownClientes_() {
     .setHelpText('Selecciona un cliente de la base de datos')
     .build();
 
-  hojasDestino.forEach(hoja => {
-    const celdaCliente = hoja.getRange(CONFIG.RANGO_CLIENTE);
-    celdaCliente.clearDataValidations();
-    celdaCliente.setDataValidation(regla);
-  });
-}
-
-function obtenerUltimaFilaConDatosEnColumna_(hoja, columna) {
-  const ultimaFila = hoja.getLastRow();
-  if (ultimaFila < 1) return 0;
-
-  const valores = hoja.getRange(1, columna, ultimaFila, 1).getDisplayValues().flat();
-
-  for (let i = valores.length - 1; i >= 0; i--) {
-    if (String(valores[i]).trim() !== '') {
-      return i + 1;
-    }
+  if (hojaFactura) {
+    hojaFactura.getRange(CONFIG.RANGO_CLIENTE).setDataValidation(regla);
   }
 
-  return 0;
+  if (hojaPresupuesto) {
+    hojaPresupuesto.getRange(CONFIG.RANGO_CLIENTE).setDataValidation(regla);
+  }
 }
 
 function aplicarEstiloModernoFacturas() {
