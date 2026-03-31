@@ -125,25 +125,27 @@ function onOpen() {
   const ui = SpreadsheetApp.getUi();
 
   ui.createMenu('Facturas')
-    .addItem('Guardar factura en registro', 'guardarFacturaEnRegistro')
-    .addItem('Nueva factura', 'nuevaFactura')
-    .addItem('Añadir línea de producto/servicio', 'anadirLineaProductoServicio')
-    .addItem('Ir a factura guardada', 'irAFacturaGuardada')
-    .addItem('Exportar factura a PDF', 'exportarFacturaPDF')
-    .addSeparator()
-    .addItem('Reparar factura actual', 'repararFacturaActual')
-    .addToUi();
+  .addItem('Guardar factura en registro', 'guardarFacturaEnRegistro')
+  .addItem('Nueva factura', 'nuevaFactura')
+  .addItem('Añadir línea de producto/servicio', 'anadirLineaProductoServicio')
+  .addItem('Eliminar línea de producto/servicio', 'eliminarLineaProductoServicio')
+  .addItem('Ir a factura guardada', 'irAFacturaGuardada')
+  .addItem('Exportar factura a PDF', 'exportarFacturaPDF')
+  .addSeparator()
+  .addItem('Reparar factura actual', 'repararFacturaActual')
+  .addToUi();
 
-  ui.createMenu('Presupuestos')
-    .addItem('Guardar presupuesto en registro', 'guardarPresupuestoEnRegistro')
-    .addItem('Nuevo presupuesto', 'nuevoPresupuesto')
-    .addItem('Añadir línea de producto/servicio', 'anadirLineaProductoServicio')
-    .addItem('Ir a presupuesto guardado', 'irAPresupuestoGuardado')
-    .addItem('Exportar presupuesto a PDF', 'exportarPresupuestoPDF')
-    .addSeparator()
-    .addItem('Convertir presupuesto en factura', 'convertirPresupuestoAFactura')
-    .addItem('Reparar presupuesto actual', 'repararPresupuestoActual')
-    .addToUi();
+ ui.createMenu('Presupuestos')
+  .addItem('Guardar presupuesto en registro', 'guardarPresupuestoEnRegistro')
+  .addItem('Nuevo presupuesto', 'nuevoPresupuesto')
+  .addItem('Añadir línea de producto/servicio', 'anadirLineaProductoServicio')
+  .addItem('Eliminar línea de producto/servicio', 'eliminarLineaProductoServicio')
+  .addItem('Ir a presupuesto guardado', 'irAPresupuestoGuardado')
+  .addItem('Exportar presupuesto a PDF', 'exportarPresupuestoPDF')
+  .addSeparator()
+  .addItem('Convertir presupuesto en factura', 'convertirPresupuestoAFactura')
+  .addItem('Reparar presupuesto actual', 'repararPresupuestoActual')
+  .addToUi();
 
   const plantillaFactura = obtenerHojaPlantillaFactura_();
   if (plantillaFactura) {
@@ -903,6 +905,9 @@ function rellenarDatosCliente_(hojaFactura) {
   if (!cliente) {
     hojaFactura.getRange(CONFIG.RANGO_CIF).clearContent();
     hojaFactura.getRange(CONFIG.RANGO_DIRECCION).clearContent();
+    hojaFactura.getRange(CONFIG.RANGO_CODIGO_POSTAL).clearContent();
+    hojaFactura.getRange(CONFIG.RANGO_ZONA_CLIENTE).clearContent();
+    actualizarDropdownZonaPorCodigoPostal_(hojaFactura);
     return;
   }
 
@@ -910,14 +915,32 @@ function rellenarDatosCliente_(hojaFactura) {
   if (ultimaFila < 2) {
     hojaFactura.getRange(CONFIG.RANGO_CIF).clearContent();
     hojaFactura.getRange(CONFIG.RANGO_DIRECCION).clearContent();
+    hojaFactura.getRange(CONFIG.RANGO_CODIGO_POSTAL).clearContent();
+    hojaFactura.getRange(CONFIG.RANGO_ZONA_CLIENTE).clearContent();
+    actualizarDropdownZonaPorCodigoPostal_(hojaFactura);
     return;
   }
 
-  const datos = hojaBase.getRange(2, 1, ultimaFila - 1, 4).getValues();
-  const filaCliente = datos.find(fila => String(fila[0]).trim() === cliente);
+  // Ahora lee 5 columnas: A, B, C, D y E
+  const datos = hojaBase.getRange(2, 1, ultimaFila - 1, 5).getDisplayValues();
+  const filaCliente = datos.find(fila => String(fila[0] || '').trim() === cliente);
 
-  hojaFactura.getRange(CONFIG.RANGO_CIF).setValue(filaCliente ? filaCliente[1] : '');
-  hojaFactura.getRange(CONFIG.RANGO_DIRECCION).setValue(filaCliente ? filaCliente[3] : '');
+  const cif = filaCliente ? String(filaCliente[1] || '').trim() : '';
+  const direccion = filaCliente ? String(filaCliente[3] || '').trim() : '';
+  let codigoPostal = filaCliente ? String(filaCliente[4] || '').trim() : '';
+
+  codigoPostal = codigoPostal.replace(/[^\d]/g, '');
+  if (codigoPostal) {
+    codigoPostal = codigoPostal.padStart(5, '0').substring(0, 5);
+  }
+
+  hojaFactura.getRange(CONFIG.RANGO_CIF).setValue(cif);
+  hojaFactura.getRange(CONFIG.RANGO_DIRECCION).setValue(direccion);
+  hojaFactura.getRange(CONFIG.RANGO_CODIGO_POSTAL).setValue(codigoPostal || '');
+
+  // La zona se vacía para que tú la elijas según el CP
+  hojaFactura.getRange(CONFIG.RANGO_ZONA_CLIENTE).clearContent();
+  actualizarDropdownZonaPorCodigoPostal_(hojaFactura);
 }
 
 function actualizarFechaSecundariaDocumento_(hojaFactura) {
@@ -1683,4 +1706,113 @@ function aplicarEstiloVisualDocumento_(hoja) {
   hoja.getRange(CONFIG.RANGO_FECHA_VENCIMIENTO).setFontWeight('bold');
 
   aplicarFormatosFactura_(hoja);
+}
+
+function eliminarLineaProductoServicio() {
+  const hojaDocumento = obtenerHojaDocumentoActiva_();
+  const ui = SpreadsheetApp.getUi();
+
+  if (!hojaDocumento) {
+    ui.alert('Activa primero una hoja de factura o de presupuesto.');
+    return;
+  }
+
+  const layout = obtenerLayoutFactura_(hojaDocumento);
+  const filaActiva = hojaDocumento.getActiveCell().getRow();
+
+  if (
+    filaActiva < CONFIG.FILA_PRIMERA_LINEA ||
+    filaActiva > layout.filaUltimaLinea
+  ) {
+    ui.alert('Colócate en una línea de producto/servicio antes de eliminarla.');
+    return;
+  }
+
+  if (hojaDocumento.isRowHiddenByUser(filaActiva)) {
+    ui.alert('La fila activa está oculta. Selecciona una línea visible.');
+    return;
+  }
+
+  const lineasVisibles = obtenerLineasVisiblesDocumento_(hojaDocumento);
+
+  if (!lineasVisibles.length) {
+    ui.alert('No hay líneas visibles para eliminar.');
+    return;
+  }
+
+  const indiceLineaActiva = lineasVisibles.findIndex(item => item.fila === filaActiva);
+
+  if (indiceLineaActiva === -1) {
+    ui.alert('Selecciona una línea válida de producto/servicio.');
+    return;
+  }
+
+  const lineasRestantes = lineasVisibles.map(item => item.valores);
+  lineasRestantes.splice(indiceLineaActiva, 1);
+
+  reconstruirLineasDocumento_(hojaDocumento, lineasRestantes);
+
+  recalcularFactura_(hojaDocumento);
+  aplicarFormatosFactura_(hojaDocumento);
+
+  const filaDestino = CONFIG.FILA_PRIMERA_LINEA + Math.min(
+    indiceLineaActiva,
+    Math.max(lineasRestantes.length - 1, 0)
+  );
+
+  hojaDocumento.setActiveRange(hojaDocumento.getRange(`A${filaDestino}`));
+}
+
+function obtenerLineasVisiblesDocumento_(hojaDocumento) {
+  const layout = obtenerLayoutFactura_(hojaDocumento);
+  const datos = hojaDocumento
+    .getRange(`A${CONFIG.FILA_PRIMERA_LINEA}:F${layout.filaUltimaLinea}`)
+    .getValues();
+
+  const lineasVisibles = [];
+
+  for (let i = 0; i < datos.length; i++) {
+    const filaReal = CONFIG.FILA_PRIMERA_LINEA + i;
+
+    if (hojaDocumento.isRowHiddenByUser(filaReal)) continue;
+
+    lineasVisibles.push({
+      fila: filaReal,
+      valores: datos[i]
+    });
+  }
+
+  return lineasVisibles;
+}
+
+function reconstruirLineasDocumento_(hojaDocumento, lineas) {
+  restablecerLineasFactura_(hojaDocumento);
+
+  const totalLineasNecesarias = Math.max(1, lineas.length);
+  const totalLineasBase = CONFIG.FILA_ULTIMA_LINEA_BASE - CONFIG.FILA_PRIMERA_LINEA + 1;
+  const lineasExtra = Math.max(0, totalLineasNecesarias - totalLineasBase);
+
+  for (let i = 0; i < lineasExtra; i++) {
+    insertarLineaDocumento_(hojaDocumento, false);
+  }
+
+  if (totalLineasNecesarias > 1) {
+    hojaDocumento.showRows(CONFIG.FILA_PRIMERA_LINEA, totalLineasNecesarias);
+  }
+
+  if (totalLineasNecesarias <= CONFIG.FILA_ULTIMA_LINEA_BASE - CONFIG.FILA_PRIMERA_LINEA) {
+    hojaDocumento.hideRows(
+      CONFIG.FILA_PRIMERA_LINEA + totalLineasNecesarias,
+      CONFIG.FILA_ULTIMA_LINEA_BASE - CONFIG.FILA_PRIMERA_LINEA + 1 - totalLineasNecesarias
+    );
+  }
+
+  if (lineas.length > 0) {
+    hojaDocumento
+      .getRange(CONFIG.FILA_PRIMERA_LINEA, 1, lineas.length, 6)
+      .setValues(lineas);
+  } else {
+    hojaDocumento.getRange(`A${CONFIG.FILA_PRIMERA_LINEA}:F${CONFIG.FILA_PRIMERA_LINEA}`).clearContent();
+    hojaDocumento.getRange(`E${CONFIG.FILA_PRIMERA_LINEA}`).setValue(CONFIG.IVA_POR_DEFECTO);
+  }
 }
