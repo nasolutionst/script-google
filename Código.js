@@ -32,8 +32,10 @@ const CONFIG = {
   ESTADO_FACTURA: 'Emitida',
   ESTADO_PRESUPUESTO: 'Pendiente',
 
+  PREFIJO_FACTURA: 'FAC',
   PREFIJO_PRESUPUESTO: 'PRE',
   FORMATO_FECHA: 'dd/MM/yyyy'
+  
 };
 
 const CODIGOS_POSTALES_IBIZA_ = {
@@ -125,27 +127,31 @@ function onOpen() {
   const ui = SpreadsheetApp.getUi();
 
   ui.createMenu('Facturas')
-  .addItem('Guardar factura en registro', 'guardarFacturaEnRegistro')
-  .addItem('Nueva factura', 'nuevaFactura')
-  .addItem('Añadir línea de producto/servicio', 'anadirLineaProductoServicio')
-  .addItem('Eliminar línea de producto/servicio', 'eliminarLineaProductoServicio')
-  .addItem('Ir a factura guardada', 'irAFacturaGuardada')
-  .addItem('Exportar factura a PDF', 'exportarFacturaPDF')
-  .addSeparator()
-  .addItem('Reparar factura actual', 'repararFacturaActual')
-  .addToUi();
+    .addItem('Guardar factura en registro', 'guardarFacturaEnRegistro')
+    .addItem('Nueva factura', 'nuevaFactura')
+    .addItem('Añadir línea de producto/servicio', 'anadirLineaProductoServicio')
+    .addItem('Eliminar línea de producto/servicio', 'eliminarLineaProductoServicio')
+    .addItem('Aplicar descuento a línea seleccionada', 'aplicarDescuentoLineaSeleccionada')
+    .addItem('Quitar descuento de línea seleccionada', 'quitarDescuentoLineaSeleccionada')
+    .addItem('Ir a factura guardada', 'irAFacturaGuardada')
+    .addItem('Exportar factura a PDF', 'exportarFacturaPDF')
+    .addSeparator()
+    .addItem('Reparar factura actual', 'repararFacturaActual')
+    .addToUi();
 
- ui.createMenu('Presupuestos')
-  .addItem('Guardar presupuesto en registro', 'guardarPresupuestoEnRegistro')
-  .addItem('Nuevo presupuesto', 'nuevoPresupuesto')
-  .addItem('Añadir línea de producto/servicio', 'anadirLineaProductoServicio')
-  .addItem('Eliminar línea de producto/servicio', 'eliminarLineaProductoServicio')
-  .addItem('Ir a presupuesto guardado', 'irAPresupuestoGuardado')
-  .addItem('Exportar presupuesto a PDF', 'exportarPresupuestoPDF')
-  .addSeparator()
-  .addItem('Convertir presupuesto en factura', 'convertirPresupuestoAFactura')
-  .addItem('Reparar presupuesto actual', 'repararPresupuestoActual')
-  .addToUi();
+  ui.createMenu('Presupuestos')
+    .addItem('Guardar presupuesto en registro', 'guardarPresupuestoEnRegistro')
+    .addItem('Nuevo presupuesto', 'nuevoPresupuesto')
+    .addItem('Añadir línea de producto/servicio', 'anadirLineaProductoServicio')
+    .addItem('Eliminar línea de producto/servicio', 'eliminarLineaProductoServicio')
+    .addItem('Aplicar descuento a línea seleccionada', 'aplicarDescuentoLineaSeleccionada')
+    .addItem('Quitar descuento de línea seleccionada', 'quitarDescuentoLineaSeleccionada')
+    .addItem('Ir a presupuesto guardado', 'irAPresupuestoGuardado')
+    .addItem('Exportar presupuesto a PDF', 'exportarPresupuestoPDF')
+    .addSeparator()
+    .addItem('Convertir presupuesto en factura', 'convertirPresupuestoAFactura')
+    .addItem('Reparar presupuesto actual', 'repararPresupuestoActual')
+    .addToUi();
 
   const plantillaFactura = obtenerHojaPlantillaFactura_();
   if (plantillaFactura) {
@@ -159,52 +165,6 @@ function onOpen() {
 
   repararDropdownClientes_();
   repararDropdownCodigosPostalesIbiza_();
-}
-
-function onEdit(e) {
-  if (!e || !e.range) return;
-
-  const hoja = e.range.getSheet();
-  if (!esHojaDocumentoEditable_(hoja)) return;
-
-  const layout = obtenerLayoutFactura_(hoja);
-  const fila = e.range.getRow();
-  const columna = e.range.getColumn();
-  const a1 = e.range.getA1Notation();
-
-  if (a1 === CONFIG.RANGO_CLIENTE) {
-    rellenarDatosCliente_(hoja);
-  }
-
-  if (a1 === CONFIG.RANGO_CODIGO_POSTAL) {
-    actualizarDropdownZonaPorCodigoPostal_(hoja);
-  }
-
-  if (a1 === CONFIG.RANGO_FECHA_FACTURA) {
-    actualizarFechaSecundariaDocumento_(hoja);
-  }
-
-  const editandoLineas =
-    fila >= CONFIG.FILA_PRIMERA_LINEA &&
-    fila <= layout.filaUltimaLinea &&
-    columna >= 1 &&
-    columna <= 6;
-
-  const editandoDescuento =
-    fila === layout.filaResumenValores && columna === 1;
-
-  const editandoIvaResumen =
-    fila === layout.filaResumenValores && columna === 4;
-
-  if (
-    editandoLineas ||
-    editandoDescuento ||
-    editandoIvaResumen ||
-    a1 === CONFIG.RANGO_CLIENTE ||
-    a1 === CONFIG.RANGO_FECHA_FACTURA
-  ) {
-    recalcularFactura_(hoja);
-  }
 }
 
 /* =========================
@@ -236,7 +196,12 @@ function guardarFacturaEnRegistroInterno_(hojaFactura, mostrarAlerta) {
 
   const layout = obtenerLayoutFactura_(hojaFactura);
 
-  const numeroFactura = hojaFactura.getRange(CONFIG.RANGO_NUMERO_FACTURA).getDisplayValue().trim();
+  let numeroFactura = hojaFactura.getRange(CONFIG.RANGO_NUMERO_FACTURA).getDisplayValue().trim();
+  if (!numeroFactura) {
+    numeroFactura = asignarNumeroFacturaSiFalta_(hojaFactura);
+    SpreadsheetApp.flush();
+  }
+
   const cliente = hojaFactura.getRange(CONFIG.RANGO_CLIENTE).getDisplayValue().trim();
   const cif = hojaFactura.getRange(CONFIG.RANGO_CIF).getDisplayValue().trim();
   const direccion = hojaFactura.getRange(CONFIG.RANGO_DIRECCION).getDisplayValue().trim();
@@ -600,6 +565,10 @@ function prepararDocumentoNuevo_(hoja, tipoDocumento) {
   hoja.getRange(`D${layout.filaResumenValores}`).setValue(CONFIG.IVA_POR_DEFECTO);
 
   hoja.getRange(CONFIG.RANGO_FECHA_FACTURA).setValue(new Date());
+
+  if (tipoDocumento === 'factura') {
+    forzarNuevoNumeroFactura_(hoja);
+  }
 
   if (tipoDocumento === 'presupuesto') {
     forzarNuevoNumeroPresupuesto_(hoja);
@@ -1815,4 +1784,273 @@ function reconstruirLineasDocumento_(hojaDocumento, lineas) {
     hojaDocumento.getRange(`A${CONFIG.FILA_PRIMERA_LINEA}:F${CONFIG.FILA_PRIMERA_LINEA}`).clearContent();
     hojaDocumento.getRange(`E${CONFIG.FILA_PRIMERA_LINEA}`).setValue(CONFIG.IVA_POR_DEFECTO);
   }
+}
+
+/* =========================
+   DESCUENTO POR LÍNEA EN FACTURA / PRESUPUESTO
+========================= */
+
+function aplicarDescuentoLineaSeleccionada() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const hoja = ss.getActiveSheet();
+  const ui = SpreadsheetApp.getUi();
+
+  if (!esHojaDocumentoEditable_(hoja)) {
+    ui.alert('Activa primero una hoja de factura o de presupuesto.');
+    return;
+  }
+
+  const layout = obtenerLayoutFactura_(hoja);
+  const filaActiva = hoja.getActiveCell().getRow();
+
+  if (
+    filaActiva < CONFIG.FILA_PRIMERA_LINEA ||
+    filaActiva > layout.filaUltimaLinea
+  ) {
+    ui.alert('Colócate en una línea de producto/servicio antes de aplicar el descuento.');
+    return;
+  }
+
+  if (hoja.isRowHiddenByUser(filaActiva)) {
+    ui.alert('La fila activa está oculta. Selecciona una línea visible.');
+    return;
+  }
+
+  const celdaDescripcion = hoja.getRange(filaActiva, 1); // Columna A
+  const celdaCantidad = hoja.getRange(filaActiva, 2);    // Columna B
+  const celdaPrecio = hoja.getRange(filaActiva, 3);      // Columna C
+
+  const descripcion = String(celdaDescripcion.getDisplayValue() || '').trim();
+  const cantidad = normalizarNumero_(celdaCantidad.getValue());
+  const precioActual = normalizarNumero_(celdaPrecio.getValue());
+
+  const filaVacia =
+    descripcion === '' &&
+    cantidad === null &&
+    precioActual === null;
+
+  if (filaVacia) {
+    ui.alert('La fila seleccionada está vacía.');
+    return;
+  }
+
+  if (precioActual === null) {
+    ui.alert('La línea seleccionada no tiene un precio unitario válido en la columna C.');
+    return;
+  }
+
+  const tipoDocumento = obtenerTipoDocumentoDeHoja_(hoja);
+  const nombreTipo = tipoDocumento === 'presupuesto' ? 'presupuesto' : 'factura';
+
+  const respuesta = ui.prompt(
+    'Aplicar descuento',
+    `Introduce el porcentaje de descuento para la fila ${filaActiva} del ${nombreTipo} (por ejemplo: 10 o 12,5).`,
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (respuesta.getSelectedButton() !== ui.Button.OK) {
+    return;
+  }
+
+  let descuento = String(respuesta.getResponseText() || '').trim();
+  descuento = descuento.replace(',', '.');
+
+  const descuentoNumero = parseFloat(descuento);
+
+  if (isNaN(descuentoNumero) || descuentoNumero <= 0 || descuentoNumero >= 100) {
+    ui.alert('Debes introducir un porcentaje válido mayor que 0 y menor que 100.');
+    return;
+  }
+
+  const notaActual = celdaPrecio.getNote() || '';
+  const precioOriginalGuardado = extraerPrecioOriginalDescuento_(notaActual);
+  const precioBase = precioOriginalGuardado !== null ? precioOriginalGuardado : precioActual;
+
+  const nuevoPrecio = redondear2_(precioBase * (1 - (descuentoNumero / 100)));
+
+  celdaPrecio.setValue(nuevoPrecio);
+  celdaPrecio.setNote(
+    construirNotaDescuentoLinea_(notaActual, precioBase, descuentoNumero)
+  );
+
+  if (descripcion) {
+    const descripcionLimpia = limpiarEtiquetaDescuentoLinea_(descripcion);
+    celdaDescripcion.setValue(
+      `${descripcionLimpia} (Dto. ${formatearDescuentoLinea_(descuentoNumero)}%)`
+    );
+  }
+
+  recalcularFactura_(hoja);
+  aplicarFormatosFactura_(hoja);
+
+  ss.toast(
+    `Descuento del ${formatearDescuentoLinea_(descuentoNumero)}% aplicado en la fila ${filaActiva}.`,
+    nombreTipo.charAt(0).toUpperCase() + nombreTipo.slice(1)
+  );
+}
+
+function quitarDescuentoLineaSeleccionada() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const hoja = ss.getActiveSheet();
+  const ui = SpreadsheetApp.getUi();
+
+  if (!esHojaDocumentoEditable_(hoja)) {
+    ui.alert('Activa primero una hoja de factura o de presupuesto.');
+    return;
+  }
+
+  const layout = obtenerLayoutFactura_(hoja);
+  const filaActiva = hoja.getActiveCell().getRow();
+
+  if (
+    filaActiva < CONFIG.FILA_PRIMERA_LINEA ||
+    filaActiva > layout.filaUltimaLinea
+  ) {
+    ui.alert('Colócate en una línea de producto/servicio antes de quitar el descuento.');
+    return;
+  }
+
+  if (hoja.isRowHiddenByUser(filaActiva)) {
+    ui.alert('La fila activa está oculta. Selecciona una línea visible.');
+    return;
+  }
+
+  const celdaDescripcion = hoja.getRange(filaActiva, 1); // Columna A
+  const celdaPrecio = hoja.getRange(filaActiva, 3);      // Columna C
+
+  const descripcion = String(celdaDescripcion.getDisplayValue() || '').trim();
+  const notaActual = celdaPrecio.getNote() || '';
+  const precioOriginal = extraerPrecioOriginalDescuento_(notaActual);
+
+  if (precioOriginal === null) {
+    ui.alert('La línea seleccionada no tiene un descuento guardado.');
+    return;
+  }
+
+  const tipoDocumento = obtenerTipoDocumentoDeHoja_(hoja);
+  const nombreTipo = tipoDocumento === 'presupuesto' ? 'presupuesto' : 'factura';
+
+  celdaPrecio.setValue(precioOriginal);
+
+  const notaLimpia = limpiarMetadatosDescuentoNota_(notaActual);
+  if (notaLimpia) {
+    celdaPrecio.setNote(notaLimpia);
+  } else {
+    celdaPrecio.clearNote();
+  }
+
+  if (descripcion) {
+    celdaDescripcion.setValue(limpiarEtiquetaDescuentoLinea_(descripcion));
+  }
+
+  recalcularFactura_(hoja);
+  aplicarFormatosFactura_(hoja);
+
+  ss.toast(
+    `Descuento eliminado de la fila ${filaActiva}.`,
+    nombreTipo.charAt(0).toUpperCase() + nombreTipo.slice(1)
+  );
+}
+
+function extraerPrecioOriginalDescuento_(nota) {
+  const match = String(nota || '').match(/DESCUENTO_SCRIPT_PRECIO_ORIGINAL=([0-9]+(?:\.[0-9]+)?)/);
+  return match ? parseFloat(match[1]) : null;
+}
+
+function construirNotaDescuentoLinea_(notaActual, precioOriginal, descuento) {
+  const notaSinMetadatos = limpiarMetadatosDescuentoNota_(notaActual);
+
+  const lineas = [
+    `DESCUENTO_SCRIPT_PRECIO_ORIGINAL=${precioOriginal}`,
+    `DESCUENTO_SCRIPT_PORCENTAJE=${descuento}`
+  ];
+
+  if (notaSinMetadatos) {
+    lineas.push(notaSinMetadatos);
+  }
+
+  return lineas.join('\n');
+}
+
+function limpiarMetadatosDescuentoNota_(nota) {
+  return String(nota || '')
+    .split('\n')
+    .filter(linea =>
+      !/^DESCUENTO_SCRIPT_PRECIO_ORIGINAL=/.test(linea) &&
+      !/^DESCUENTO_SCRIPT_PORCENTAJE=/.test(linea)
+    )
+    .join('\n')
+    .trim();
+}
+
+function limpiarEtiquetaDescuentoLinea_(texto) {
+  return String(texto || '')
+    .replace(/\s*\(Dto\.\s*[0-9]+(?:[.,][0-9]+)?%\)\s*$/i, '')
+    .trim();
+}
+
+function formatearDescuentoLinea_(valor) {
+  return String(redondear2_(valor))
+    .replace(/\.00$/, '')
+    .replace(/(\.\d)0$/, '$1')
+    .replace('.', ',');
+}
+
+function redondear2_(numero) {
+  return Math.round((Number(numero) + Number.EPSILON) * 100) / 100;
+}
+
+/* =========================
+   NUMERACIÓN FACTURAS
+========================= */
+
+function generarSiguienteNumeroFactura_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const hojaRegistro = ss.getSheetByName(CONFIG.HOJA_REGISTRO);
+
+  if (!hojaRegistro) {
+    throw new Error(`No existe la hoja "${CONFIG.HOJA_REGISTRO}".`);
+  }
+
+  const ultimaFila = hojaRegistro.getLastRow();
+  let maximo = 0;
+
+  if (ultimaFila >= 2) {
+    const numeros = hojaRegistro
+      .getRange(2, 2, ultimaFila - 1, 1)
+      .getDisplayValues()
+      .flat()
+      .map(v => String(v).trim());
+
+    numeros.forEach(numero => {
+      const match = numero.match(/(\d+)(?!.*\d)/);
+      if (match) {
+        maximo = Math.max(maximo, Number(match[1]));
+      }
+    });
+  }
+
+  const anio = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy');
+  const correlativo = String(maximo + 1).padStart(3, '0');
+
+  return `${CONFIG.PREFIJO_FACTURA}-${anio}-${correlativo}`;
+}
+
+function asignarNumeroFacturaSiFalta_(hojaFactura) {
+  const rango = hojaFactura.getRange(CONFIG.RANGO_NUMERO_FACTURA);
+  const numeroActual = rango.getDisplayValue().trim();
+
+  if (numeroActual) {
+    return numeroActual;
+  }
+
+  const nuevoNumero = generarSiguienteNumeroFactura_();
+  rango.setValue(nuevoNumero);
+  return nuevoNumero;
+}
+
+function forzarNuevoNumeroFactura_(hojaFactura) {
+  const nuevoNumero = generarSiguienteNumeroFactura_();
+  hojaFactura.getRange(CONFIG.RANGO_NUMERO_FACTURA).setValue(nuevoNumero);
+  return nuevoNumero;
 }
