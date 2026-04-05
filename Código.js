@@ -870,11 +870,12 @@ function rellenarDatosCliente_(hojaFactura) {
   if (!hojaBase) return;
 
   const cliente = hojaFactura.getRange(CONFIG.RANGO_CLIENTE).getDisplayValue().trim();
+  const rangoCP = hojaFactura.getRange(CONFIG.RANGO_CODIGO_POSTAL);
 
   if (!cliente) {
     hojaFactura.getRange(CONFIG.RANGO_CIF).clearContent();
     hojaFactura.getRange(CONFIG.RANGO_DIRECCION).clearContent();
-    hojaFactura.getRange(CONFIG.RANGO_CODIGO_POSTAL).clearContent();
+    rangoCP.clearDataValidations().clearContent();
     hojaFactura.getRange(CONFIG.RANGO_ZONA_CLIENTE).clearContent();
     actualizarDropdownZonaPorCodigoPostal_(hojaFactura);
     return;
@@ -884,13 +885,12 @@ function rellenarDatosCliente_(hojaFactura) {
   if (ultimaFila < 2) {
     hojaFactura.getRange(CONFIG.RANGO_CIF).clearContent();
     hojaFactura.getRange(CONFIG.RANGO_DIRECCION).clearContent();
-    hojaFactura.getRange(CONFIG.RANGO_CODIGO_POSTAL).clearContent();
+    rangoCP.clearDataValidations().clearContent();
     hojaFactura.getRange(CONFIG.RANGO_ZONA_CLIENTE).clearContent();
     actualizarDropdownZonaPorCodigoPostal_(hojaFactura);
     return;
   }
 
-  // Ahora lee 5 columnas: A, B, C, D y E
   const datos = hojaBase.getRange(2, 1, ultimaFila - 1, 5).getDisplayValues();
   const filaCliente = datos.find(fila => String(fila[0] || '').trim() === cliente);
 
@@ -905,9 +905,11 @@ function rellenarDatosCliente_(hojaFactura) {
 
   hojaFactura.getRange(CONFIG.RANGO_CIF).setValue(cif);
   hojaFactura.getRange(CONFIG.RANGO_DIRECCION).setValue(direccion);
-  hojaFactura.getRange(CONFIG.RANGO_CODIGO_POSTAL).setValue(codigoPostal || '');
 
-  // La zona se vacía para que tú la elijas según el CP
+  // Quitamos temporalmente la validación para evitar error al escribir el CP
+  rangoCP.clearDataValidations();
+  rangoCP.setValue(codigoPostal || '');
+
   hojaFactura.getRange(CONFIG.RANGO_ZONA_CLIENTE).clearContent();
   actualizarDropdownZonaPorCodigoPostal_(hojaFactura);
 }
@@ -1187,8 +1189,8 @@ function esHojaPresupuestoEditable_(hoja) {
 
 function repararHojaFactura_(hojaFactura) {
   aplicarFormatosFactura_(hojaFactura);
-  aplicarDropdownCodigosPostalesIbizaEnHoja_(hojaFactura);
-  rellenarDatosCliente_(hojaFactura);
+  rellenarDatosCliente_(hojaFactura); // primero rellena datos
+  aplicarDropdownCodigosPostalesIbizaEnHoja_(hojaFactura); // después aplica el desplegable
   actualizarFechaSecundariaDocumento_(hojaFactura);
   recalcularFactura_(hojaFactura);
 }
@@ -1407,38 +1409,6 @@ function obtenerCarpetaRaizMensualFacturas_() {
 /* =========================
    NUMERACIÓN PRESUPUESTOS
 ========================= */
-
-function generarSiguienteNumeroPresupuesto_() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const hojaRegistro = ss.getSheetByName(CONFIG.HOJA_REGISTRO_PRESUPUESTOS);
-
-  if (!hojaRegistro) {
-    throw new Error(`No existe la hoja "${CONFIG.HOJA_REGISTRO_PRESUPUESTOS}".`);
-  }
-
-  const ultimaFila = hojaRegistro.getLastRow();
-  let maximo = 0;
-
-  if (ultimaFila >= 2) {
-    const numeros = hojaRegistro
-      .getRange(2, 2, ultimaFila - 1, 1)
-      .getDisplayValues()
-      .flat()
-      .map(v => String(v).trim());
-
-    numeros.forEach(numero => {
-      const match = numero.match(/(\d+)(?!.*\d)/);
-      if (match) {
-        maximo = Math.max(maximo, Number(match[1]));
-      }
-    });
-  }
-
-  const anio = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy');
-  const correlativo = String(maximo + 1).padStart(3, '0');
-
-  return `${CONFIG.PREFIJO_PRESUPUESTO}-${anio}-${correlativo}`;
-}
 
 function asignarNumeroPresupuestoSiFalta_(hojaPresupuesto) {
   const rango = hojaPresupuesto.getRange(CONFIG.RANGO_NUMERO_FACTURA);
@@ -2049,8 +2019,101 @@ function asignarNumeroFacturaSiFalta_(hojaFactura) {
   return nuevoNumero;
 }
 
-function forzarNuevoNumeroFactura_(hojaFactura) {
-  const nuevoNumero = generarSiguienteNumeroFactura_();
-  hojaFactura.getRange(CONFIG.RANGO_NUMERO_FACTURA).setValue(nuevoNumero);
-  return nuevoNumero;
+function onEdit(e) {
+  try {
+    if (!e || !e.range) return;
+
+    const hoja = e.range.getSheet();
+    if (!esHojaDocumentoEditable_(hoja)) return;
+
+    const fila = e.range.getRow();
+    const col = e.range.getColumn();
+    const a1 = e.range.getA1Notation();
+
+    // Cliente
+    if (a1 === CONFIG.RANGO_CLIENTE) {
+      rellenarDatosCliente_(hoja);
+      recalcularFactura_(hoja);
+      aplicarFormatosFactura_(hoja);
+      return;
+    }
+
+    // Código postal
+    if (a1 === CONFIG.RANGO_CODIGO_POSTAL) {
+      actualizarDropdownZonaPorCodigoPostal_(hoja);
+      return;
+    }
+
+    // Fecha de emisión
+    if (a1 === CONFIG.RANGO_FECHA_FACTURA) {
+      actualizarFechaSecundariaDocumento_(hoja);
+      recalcularFactura_(hoja);
+      aplicarFormatosFactura_(hoja);
+      return;
+    }
+
+    const layout = obtenerLayoutFactura_(hoja);
+
+    // Líneas de producto/servicio
+    const editandoLineaDocumento =
+      fila >= CONFIG.FILA_PRIMERA_LINEA &&
+      fila <= layout.filaUltimaLinea &&
+      col >= 1 &&
+      col <= 5;
+
+    // Descuento global / IVA resumen
+    const editandoResumen =
+      fila === layout.filaResumenValores &&
+      (col === 1 || col === 4);
+
+    if (editandoLineaDocumento || editandoResumen) {
+      recalcularFactura_(hoja);
+      aplicarFormatosFactura_(hoja);
+    }
+
+  } catch (error) {
+    console.error('Error en onEdit:', error);
+  }
+}
+
+function generarSiguienteNumeroFactura_() {
+  return generarSiguienteNumeroDesdeUltimoRegistro_(
+    CONFIG.HOJA_REGISTRO,
+    CONFIG.PREFIJO_FACTURA
+  );
+}
+
+function generarSiguienteNumeroPresupuesto_() {
+  return generarSiguienteNumeroDesdeUltimoRegistro_(
+    CONFIG.HOJA_REGISTRO_PRESUPUESTOS,
+    CONFIG.PREFIJO_PRESUPUESTO
+  );
+}
+
+function generarSiguienteNumeroDesdeUltimoRegistro_(nombreHojaRegistro, prefijo) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const hojaRegistro = ss.getSheetByName(nombreHojaRegistro);
+
+  if (!hojaRegistro) {
+    throw new Error(`No existe la hoja "${nombreHojaRegistro}".`);
+  }
+
+  const ultimaFila = hojaRegistro.getLastRow();
+  const anio = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy');
+
+  let ultimoCorrelativo = 0;
+
+  if (ultimaFila >= 2) {
+    const ultimoNumero = String(
+      hojaRegistro.getRange(ultimaFila, 2).getDisplayValue() || ''
+    ).trim();
+
+    const match = ultimoNumero.match(/(\d+)(?!.*\d)/);
+    if (match) {
+      ultimoCorrelativo = Number(match[1]) || 0;
+    }
+  }
+
+  const correlativo = String(ultimoCorrelativo + 1).padStart(3, '0');
+  return `${prefijo}-${anio}-${correlativo}`;
 }
