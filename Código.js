@@ -4,7 +4,7 @@ const CONFIG = {
   HOJA_BASE: 'BaseDropdown',
   HOJA_REGISTRO: 'RegistroFacturas',
   HOJA_REGISTRO_PRESUPUESTOS: 'RegistroPresupuestos',
-  
+
   PDF_FOLDER_ID: '1qDlTzogwfnQlnycc83wmsQIC2apf4ZzO',
   NOMBRE_CARPETA_FACTURAS_CLIENTE: 'Facturas por cliente',
   NOMBRE_CARPETA_PRESUPUESTOS_CLIENTE: 'Presupuestos por cliente',
@@ -35,7 +35,6 @@ const CONFIG = {
   PREFIJO_FACTURA: 'FAC',
   PREFIJO_PRESUPUESTO: 'PRE',
   FORMATO_FECHA: 'dd/MM/yyyy'
-  
 };
 
 const CODIGOS_POSTALES_IBIZA_ = {
@@ -165,6 +164,58 @@ function onOpen() {
 
   repararDropdownClientes_();
   repararDropdownCodigosPostalesIbiza_();
+}
+
+function onEdit(e) {
+  try {
+    if (!e || !e.range) return;
+
+    const hoja = e.range.getSheet();
+    if (!esHojaDocumentoEditable_(hoja)) return;
+
+    const fila = e.range.getRow();
+    const col = e.range.getColumn();
+    const a1 = e.range.getA1Notation();
+
+    if (a1 === CONFIG.RANGO_CLIENTE) {
+      rellenarDatosCliente_(hoja);
+      recalcularFactura_(hoja);
+      aplicarFormatosFactura_(hoja);
+      return;
+    }
+
+    if (a1 === CONFIG.RANGO_CODIGO_POSTAL) {
+      actualizarDropdownZonaPorCodigoPostal_(hoja);
+      return;
+    }
+
+    if (a1 === CONFIG.RANGO_FECHA_FACTURA) {
+      actualizarFechaSecundariaDocumento_(hoja);
+      recalcularFactura_(hoja);
+      aplicarFormatosFactura_(hoja);
+      return;
+    }
+
+    const layout = obtenerLayoutFactura_(hoja);
+
+    const editandoLineaDocumento =
+      fila >= CONFIG.FILA_PRIMERA_LINEA &&
+      fila <= layout.filaUltimaLinea &&
+      col >= 1 &&
+      col <= 5;
+
+    const editandoResumen =
+      fila === layout.filaResumenValores &&
+      (col === 1 || col === 4);
+
+    if (editandoLineaDocumento || editandoResumen) {
+      recalcularFactura_(hoja);
+      aplicarFormatosFactura_(hoja);
+    }
+
+  } catch (error) {
+    console.error('Error en onEdit:', error);
+  }
 }
 
 /* =========================
@@ -906,7 +957,6 @@ function rellenarDatosCliente_(hojaFactura) {
   hojaFactura.getRange(CONFIG.RANGO_CIF).setValue(cif);
   hojaFactura.getRange(CONFIG.RANGO_DIRECCION).setValue(direccion);
 
-  // Quitamos temporalmente la validación para evitar error al escribir el CP
   rangoCP.clearDataValidations();
   rangoCP.setValue(codigoPostal || '');
 
@@ -1189,8 +1239,8 @@ function esHojaPresupuestoEditable_(hoja) {
 
 function repararHojaFactura_(hojaFactura) {
   aplicarFormatosFactura_(hojaFactura);
-  rellenarDatosCliente_(hojaFactura); // primero rellena datos
-  aplicarDropdownCodigosPostalesIbizaEnHoja_(hojaFactura); // después aplica el desplegable
+  rellenarDatosCliente_(hojaFactura);
+  aplicarDropdownCodigosPostalesIbizaEnHoja_(hojaFactura);
   actualizarFechaSecundariaDocumento_(hojaFactura);
   recalcularFactura_(hojaFactura);
 }
@@ -1786,9 +1836,9 @@ function aplicarDescuentoLineaSeleccionada() {
     return;
   }
 
-  const celdaDescripcion = hoja.getRange(filaActiva, 1); // Columna A
-  const celdaCantidad = hoja.getRange(filaActiva, 2);    // Columna B
-  const celdaPrecio = hoja.getRange(filaActiva, 3);      // Columna C
+  const celdaDescripcion = hoja.getRange(filaActiva, 1);
+  const celdaCantidad = hoja.getRange(filaActiva, 2);
+  const celdaPrecio = hoja.getRange(filaActiva, 3);
 
   const descripcion = String(celdaDescripcion.getDisplayValue() || '').trim();
   const cantidad = normalizarNumero_(celdaCantidad.getValue());
@@ -1885,8 +1935,8 @@ function quitarDescuentoLineaSeleccionada() {
     return;
   }
 
-  const celdaDescripcion = hoja.getRange(filaActiva, 1); // Columna A
-  const celdaPrecio = hoja.getRange(filaActiva, 3);      // Columna C
+  const celdaDescripcion = hoja.getRange(filaActiva, 1);
+  const celdaPrecio = hoja.getRange(filaActiva, 3);
 
   const descripcion = String(celdaDescripcion.getDisplayValue() || '').trim();
   const notaActual = celdaPrecio.getNote() || '';
@@ -1971,40 +2021,8 @@ function redondear2_(numero) {
 }
 
 /* =========================
-   NUMERACIÓN FACTURAS
+   NUMERACIÓN FACTURAS / PRESUPUESTOS
 ========================= */
-
-function generarSiguienteNumeroFactura_() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const hojaRegistro = ss.getSheetByName(CONFIG.HOJA_REGISTRO);
-
-  if (!hojaRegistro) {
-    throw new Error(`No existe la hoja "${CONFIG.HOJA_REGISTRO}".`);
-  }
-
-  const ultimaFila = hojaRegistro.getLastRow();
-  let maximo = 0;
-
-  if (ultimaFila >= 2) {
-    const numeros = hojaRegistro
-      .getRange(2, 2, ultimaFila - 1, 1)
-      .getDisplayValues()
-      .flat()
-      .map(v => String(v).trim());
-
-    numeros.forEach(numero => {
-      const match = numero.match(/(\d+)(?!.*\d)/);
-      if (match) {
-        maximo = Math.max(maximo, Number(match[1]));
-      }
-    });
-  }
-
-  const anio = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy');
-  const correlativo = String(maximo + 1).padStart(3, '0');
-
-  return `${CONFIG.PREFIJO_FACTURA}-${anio}-${correlativo}`;
-}
 
 function asignarNumeroFacturaSiFalta_(hojaFactura) {
   const rango = hojaFactura.getRange(CONFIG.RANGO_NUMERO_FACTURA);
@@ -2019,61 +2037,10 @@ function asignarNumeroFacturaSiFalta_(hojaFactura) {
   return nuevoNumero;
 }
 
-function onEdit(e) {
-  try {
-    if (!e || !e.range) return;
-
-    const hoja = e.range.getSheet();
-    if (!esHojaDocumentoEditable_(hoja)) return;
-
-    const fila = e.range.getRow();
-    const col = e.range.getColumn();
-    const a1 = e.range.getA1Notation();
-
-    // Cliente
-    if (a1 === CONFIG.RANGO_CLIENTE) {
-      rellenarDatosCliente_(hoja);
-      recalcularFactura_(hoja);
-      aplicarFormatosFactura_(hoja);
-      return;
-    }
-
-    // Código postal
-    if (a1 === CONFIG.RANGO_CODIGO_POSTAL) {
-      actualizarDropdownZonaPorCodigoPostal_(hoja);
-      return;
-    }
-
-    // Fecha de emisión
-    if (a1 === CONFIG.RANGO_FECHA_FACTURA) {
-      actualizarFechaSecundariaDocumento_(hoja);
-      recalcularFactura_(hoja);
-      aplicarFormatosFactura_(hoja);
-      return;
-    }
-
-    const layout = obtenerLayoutFactura_(hoja);
-
-    // Líneas de producto/servicio
-    const editandoLineaDocumento =
-      fila >= CONFIG.FILA_PRIMERA_LINEA &&
-      fila <= layout.filaUltimaLinea &&
-      col >= 1 &&
-      col <= 5;
-
-    // Descuento global / IVA resumen
-    const editandoResumen =
-      fila === layout.filaResumenValores &&
-      (col === 1 || col === 4);
-
-    if (editandoLineaDocumento || editandoResumen) {
-      recalcularFactura_(hoja);
-      aplicarFormatosFactura_(hoja);
-    }
-
-  } catch (error) {
-    console.error('Error en onEdit:', error);
-  }
+function forzarNuevoNumeroFactura_(hojaFactura) {
+  const nuevoNumero = generarSiguienteNumeroFactura_();
+  hojaFactura.getRange(CONFIG.RANGO_NUMERO_FACTURA).setValue(nuevoNumero);
+  return nuevoNumero;
 }
 
 function generarSiguienteNumeroFactura_() {
